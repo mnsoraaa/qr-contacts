@@ -63,10 +63,9 @@ function localPart(value: string) {
   return stripCountryCode(value).trim().replace(/^0+/, "");
 }
 
-/** Number for captions, e.g. "012-345 6789" → "+60 123456789". */
+/** Number for captions, e.g. "012-345 6789" → "+60123456789". */
 export function displayPhone(value: string) {
-  const digits = localPart(value).replace(/\D/g, "");
-  return digits ? `${COUNTRY_CODE} ${digits}` : "";
+  return normalizePhone(value);
 }
 
 /** E.164 form (+60 and digits only), so every phone app can dial it. */
