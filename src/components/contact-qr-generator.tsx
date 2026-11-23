@@ -534,8 +534,9 @@ export function ContactQrGenerator() {
 
       {/* Print-only layout */}
       {isValid && (
-        <div className="hidden print:block">
-          <div className="flex justify-center">
+        // Fixed + inset-0 fills the printable area, so the label sits in the middle of the page.
+        <div className="hidden print:fixed print:inset-0 print:flex print:items-center print:justify-center">
+          <div>
             <div
               className="flex flex-col items-center gap-[2mm] p-[4mm] text-black"
               style={{ width: `${PRINT_MM[options.size] + 8}mm` }}
