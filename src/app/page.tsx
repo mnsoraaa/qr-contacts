@@ -1,5 +1,5 @@
 import Image from "next/image";
-import { ContactQrGeneratorClient } from "@/components/contact-qr-generator-client";
+import { GeneratorTabs } from "@/components/generator-tabs";
 import { InstallButton } from "@/components/install-button";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -24,10 +24,10 @@ export default function Home() {
           </h1>
           <p className="text-muted-foreground mt-2 text-pretty sm:text-lg">
             Anyone can scan it with their phone camera and save you to their contacts in one tap. Print it or download
-            it.
+            it, or upload a spreadsheet to make QR codes for a whole team.
           </p>
         </section>
-        <ContactQrGeneratorClient />
+        <GeneratorTabs />
       </main>
 
       <footer className="text-muted-foreground px-4 pb-8 text-center text-xs print:hidden">

@@ -1,24 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { QRCodeCanvas, QRCodeSVG } from "qrcode.react";
-import {
-  BriefcaseIcon,
-  Building2Icon,
-  CheckIcon,
-  ChevronDownIcon,
-  LayersIcon,
-  PhoneIcon,
-  UserIcon,
-  type LucideIcon,
-  DownloadIcon,
-  EyeIcon,
-  PrinterIcon,
-  QrCodeIcon,
-  RotateCcwIcon,
-} from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
+import { ChevronDownIcon, DownloadIcon, EyeIcon, PrinterIcon, QrCodeIcon, RotateCcwIcon } from "lucide-react";
 import { toast } from "sonner";
 
+import { CaptionToggles } from "@/components/caption-toggles";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -28,43 +15,23 @@ import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { PhoneField } from "@/components/phone-field";
+import {
+  buildCaptions,
+  defaultShowOptions,
+  downloadBlob,
+  fileBaseName,
+  renderLabelPng,
+  type ShowOptions,
+} from "@/lib/qr-label";
 import { buildVCard, emptyContact, fullName, toE164, validate, type Contact } from "@/lib/vcard";
 
 type PhoneKey = "phone" | "workPhone";
 
 type PrintSize = "small" | "medium" | "large";
 
-type Options = {
-  showName: boolean;
-  showPhone: boolean;
-  showPosition: boolean;
-  showUnit: boolean;
-  showDepartment: boolean;
-  size: PrintSize;
-};
+type Options = ShowOptions & { size: PrintSize };
 
-const defaultOptions: Options = {
-  showName: true,
-  showPhone: true,
-  showPosition: true,
-  showUnit: true,
-  showDepartment: true,
-  size: "medium",
-};
-
-type ShowOption = "showName" | "showPosition" | "showUnit" | "showDepartment" | "showPhone";
-
-/** Label lines the user can show or hide, in the order they appear under the QR code. */
-const TOGGLES: { option: ShowOption; label: string; icon: LucideIcon }[] = [
-  { option: "showName", label: "Name", icon: UserIcon },
-  { option: "showPhone", label: "Phone", icon: PhoneIcon },
-  { option: "showPosition", label: "Position", icon: BriefcaseIcon },
-  { option: "showUnit", label: "Unit", icon: LayersIcon },
-  { option: "showDepartment", label: "Department", icon: Building2Icon },
-];
-
-/** A line of text shown under the QR code; `primary` is the bold headline. */
-type Caption = { key: string; text: string; primary?: boolean };
+const defaultOptions: Options = { ...defaultShowOptions, size: "medium" };
 
 /** QR edge length on paper, in millimetres. */
 const PRINT_MM: Record<PrintSize, number> = { small: 35, medium: 55, large: 90 };
@@ -107,7 +74,6 @@ export function ContactQrGenerator() {
   const [touched, setTouched] = useState<Partial<Record<keyof Contact, boolean>>>({});
   const [showMore, setShowMore] = useState(() => hasExtras(contact));
   const [previewVisible, setPreviewVisible] = useState(false);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -133,16 +99,7 @@ export function ContactQrGenerator() {
   const isValid = Object.keys(errors).length === 0;
   const vcard = useMemo(() => (isValid ? buildVCard(contact) : ""), [contact, isValid]);
   const name = fullName(contact);
-  const phone = contact.phone;
-
-  // Lines under the QR code, shared by the preview, the printout and the PNG.
-  const captions: Caption[] = [
-    { key: "name", text: name, show: options.showName, primary: true },
-    { key: "phone", text: phone, show: options.showPhone },
-    { key: "position", text: contact.position.trim(), show: options.showPosition },
-    { key: "unit", text: contact.unit.trim(), show: options.showUnit },
-    { key: "department", text: contact.department.trim(), show: options.showDepartment },
-  ].filter((c) => c.show && c.text);
+  const captions = buildCaptions(contact, options);
 
   const update = (field: keyof Contact) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setContact((c) => ({ ...c, [field]: e.target.value }));
@@ -156,56 +113,17 @@ export function ContactQrGenerator() {
     return false;
   }
 
-  /** Compose the QR plus optional caption into a PNG blob. */
-  async function renderPng(): Promise<Blob | null> {
-    const qr = canvasRef.current;
-    if (!qr) return null;
-    const lines = captions.map((c) => ({
-      text: c.text,
-      font: c.primary ? "600 64px system-ui, sans-serif" : "48px system-ui, sans-serif",
-    }));
-
-    const pad = 48;
-    const lineH = 80;
-    const out = document.createElement("canvas");
-    out.width = qr.width + pad * 2;
-    out.height = qr.height + pad * 2 + (lines.length ? lines.length * lineH + 16 : 0);
-    const ctx = out.getContext("2d")!;
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, out.width, out.height);
-    ctx.drawImage(qr, pad, pad);
-    ctx.fillStyle = "#111";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    lines.forEach((l, i) => {
-      ctx.font = l.font;
-      ctx.fillText(l.text, out.width / 2, pad + qr.height + 16 + lineH * i + lineH / 2, out.width - pad * 2);
-    });
-    return new Promise((resolve) => out.toBlob(resolve, "image/png"));
-  }
-
-  const fileName = `${(name || "contact").replace(/[^\w-]+/g, "_")}-qr.png`;
+  const fileName = `${fileBaseName(name)}-qr.png`;
 
   async function handleDownload() {
     if (!requireValid()) return;
-    const blob = await renderPng();
-    if (!blob) return;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(await renderLabelPng(vcard, captions), fileName);
     toast.success("QR code downloaded");
   }
 
   function handlePrint() {
     if (!requireValid()) return;
     window.print();
-  }
-
-  function setAllShown(show: boolean) {
-    setOptions((o) => ({ ...o, ...Object.fromEntries(TOGGLES.map((t) => [t.option, show])) }));
   }
 
   function handleReset() {
@@ -396,59 +314,7 @@ export function ContactQrGenerator() {
                 </div>
               </div>
 
-              <div className="grid gap-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <Label>Show under QR code</Label>
-                  <div className="flex items-center gap-1 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setAllShown(true)}
-                      className="text-muted-foreground hover:text-foreground rounded px-1.5 py-1 font-medium transition-colors"
-                    >
-                      All
-                    </button>
-                    <span className="text-muted-foreground/50">·</span>
-                    <button
-                      type="button"
-                      onClick={() => setAllShown(false)}
-                      className="text-muted-foreground hover:text-foreground rounded px-1.5 py-1 font-medium transition-colors"
-                    >
-                      QR only
-                    </button>
-                  </div>
-                </div>
-                <ToggleGroup
-                  multiple
-                  variant="outline"
-                  spacing={2}
-                  className="w-full flex-wrap"
-                  value={TOGGLES.filter((t) => options[t.option]).map((t) => t.option)}
-                  onValueChange={(shown: string[]) =>
-                    setOptions((o) => ({
-                      ...o,
-                      ...Object.fromEntries(TOGGLES.map((t) => [t.option, shown.includes(t.option)])),
-                    }))
-                  }
-                >
-                  {TOGGLES.map(({ option, label, icon: Icon }) => {
-                    const on = options[option];
-                    return (
-                      <ToggleGroupItem
-                        key={option}
-                        value={option}
-                        aria-label={`${on ? "Hide" : "Show"} ${label.toLowerCase()}`}
-                        className={cn(
-                          "h-9 rounded-full! border px-3 transition-all active:scale-95",
-                          "aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary/90 aria-pressed:hover:text-primary-foreground",
-                        )}
-                      >
-                        {on ? <CheckIcon className="animate-in zoom-in-50 duration-150" /> : <Icon />}
-                        {label}
-                      </ToggleGroupItem>
-                    );
-                  })}
-                </ToggleGroup>
-              </div>
+              <CaptionToggles value={options} onChange={(show) => setOptions((o) => ({ ...o, ...show }))} />
 
               <Separator />
 
@@ -496,13 +362,6 @@ export function ContactQrGenerator() {
             <EyeIcon />
             View QR code
           </Button>
-        </div>
-      )}
-
-      {/* High-resolution canvas used for the PNG download */}
-      {isValid && (
-        <div className="hidden" aria-hidden>
-          <QRCodeCanvas ref={canvasRef} value={vcard} level="M" size={1024} marginSize={2} />
         </div>
       )}
 
