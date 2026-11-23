@@ -23,8 +23,8 @@ export default function Home() {
             Turn your contact into a QR code
           </h1>
           <p className="text-muted-foreground mt-2 text-pretty sm:text-lg">
-            Anyone can scan it with their phone camera and save you to their contacts in one tap. Print it, download
-            it, or share it.
+            Anyone can scan it with their phone camera and save you to their contacts in one tap. Print it or download
+            it.
           </p>
         </section>
         <ContactQrGeneratorClient />

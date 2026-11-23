@@ -16,7 +16,6 @@ import {
   PrinterIcon,
   QrCodeIcon,
   RotateCcwIcon,
-  Share2Icon,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -28,16 +27,10 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
-import {
-  buildVCard,
-  COUNTRY_CODE,
-  displayPhone,
-  emptyContact,
-  fullName,
-  stripCountryCode,
-  validate,
-  type Contact,
-} from "@/lib/vcard";
+import { PhoneField } from "@/components/phone-field";
+import { buildVCard, emptyContact, fullName, toE164, validate, type Contact } from "@/lib/vcard";
+
+type PhoneKey = "phone" | "workPhone";
 
 type PrintSize = "small" | "medium" | "large";
 
@@ -88,7 +81,7 @@ function loadSaved(): Saved {
 }
 
 const hasExtras = (c: Contact) =>
-  [c.workPhone, c.email, c.organization, c.title, c.website, c.street, c.city, c.region, c.postcode, c.country, c.note].some(
+  [c.workPhone, c.email, c.organization, c.website, c.street, c.city, c.region, c.postcode, c.country, c.note].some(
     (v) => v.trim(),
   );
 
@@ -97,14 +90,22 @@ export function ContactQrGenerator() {
   // Restore the last contact from this device (data never leaves the browser).
   const [saved] = useState(loadSaved);
   const [contact, setContact] = useState<Contact>(() => {
-    const c = { ...emptyContact, ...saved.contact };
-    // Older saves may include +60, which the field now shows as a fixed prefix.
-    return { ...c, phone: stripCountryCode(c.phone), workPhone: stripCountryCode(c.workPhone) };
+    // Older saves had a separate "Job title" field, now merged into Position.
+    // Older saves kept local digits plus a separate country; phones are now E.164.
+    const { title, phoneCountry, workPhoneCountry, ...rest } = (saved.contact ?? {}) as Partial<Contact> & {
+      title?: string;
+      phoneCountry?: string;
+      workPhoneCountry?: string;
+    };
+    const c = { ...emptyContact, ...rest };
+    if (!c.position.trim() && title) c.position = title;
+    c.phone = toE164(c.phone, phoneCountry);
+    c.workPhone = toE164(c.workPhone, workPhoneCountry);
+    return c;
   });
   const [options, setOptions] = useState<Options>(() => ({ ...defaultOptions, ...saved.options }));
   const [touched, setTouched] = useState<Partial<Record<keyof Contact, boolean>>>({});
   const [showMore, setShowMore] = useState(() => hasExtras(contact));
-  const [canShare] = useState(() => "share" in navigator && "canShare" in navigator);
   const [previewVisible, setPreviewVisible] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
@@ -132,7 +133,7 @@ export function ContactQrGenerator() {
   const isValid = Object.keys(errors).length === 0;
   const vcard = useMemo(() => (isValid ? buildVCard(contact) : ""), [contact, isValid]);
   const name = fullName(contact);
-  const phone = displayPhone(contact.phone);
+  const phone = contact.phone;
 
   // Lines under the QR code, shared by the preview, the printout and the PNG.
   const captions: Caption[] = [
@@ -143,10 +144,8 @@ export function ContactQrGenerator() {
     { key: "department", text: contact.department.trim(), show: options.showDepartment },
   ].filter((c) => c.show && c.text);
 
-  const update = (field: keyof Contact) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const value = field === "phone" || field === "workPhone" ? stripCountryCode(e.target.value) : e.target.value;
-    setContact((c) => ({ ...c, [field]: value }));
-  };
+  const update = (field: keyof Contact) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setContact((c) => ({ ...c, [field]: e.target.value }));
   const touch = (field: keyof Contact) => () => setTouched((t) => ({ ...t, [field]: true }));
   const errorFor = (field: keyof Contact) => (touched[field] ? errors[field] : undefined);
 
@@ -200,29 +199,6 @@ export function ContactQrGenerator() {
     toast.success("QR code downloaded");
   }
 
-  async function handleShare() {
-    if (!requireValid()) return;
-    const blob = await renderPng();
-    if (!blob) return;
-    const image = new File([blob], fileName, { type: "image/png" });
-    // The .vcf lets the receiver tap to add the contact without scanning.
-    const card = new File([vcard], fileName.replace(/-qr\.png$/, ".vcf"), { type: "text/vcard" });
-
-    // Not every platform accepts contact files in the share sheet; fall back to the image alone.
-    const withCard = navigator.canShare?.({ files: [image, card] });
-    const files = withCard ? [image, card] : [image];
-    if (!navigator.canShare?.({ files })) {
-      toast.error("Sharing files isn't supported on this device");
-      return;
-    }
-    try {
-      await navigator.share({ files, title: `${name} — contact` });
-      if (!withCard) toast.info("Shared the QR image. This device can't share contact files.");
-    } catch (err) {
-      if ((err as Error).name !== "AbortError") toast.error("Could not share the QR code");
-    }
-  }
-
   function handlePrint() {
     if (!requireValid()) return;
     window.print();
@@ -242,7 +218,7 @@ export function ContactQrGenerator() {
   const field = (
     id: keyof Contact,
     label: string,
-    { prefix, ...props }: React.ComponentProps<typeof Input> & { required?: boolean; prefix?: string } = {},
+    props: React.ComponentProps<typeof Input> & { required?: boolean } = {},
   ) => {
     const err = errorFor(id);
     return (
@@ -251,23 +227,43 @@ export function ContactQrGenerator() {
           {label}
           {props.required && <span className="text-destructive">*</span>}
         </Label>
-        <div className="relative">
-          {prefix && (
-            <span className="text-muted-foreground pointer-events-none absolute inset-y-0 left-3 flex items-center text-base md:text-sm">
-              {prefix}
-            </span>
-          )}
-          <Input
-            id={id}
-            value={contact[id]}
-            onChange={update(id)}
-            onBlur={touch(id)}
-            aria-invalid={!!err}
-            aria-describedby={err ? `${id}-error` : undefined}
-            className={cn("h-11 text-base md:text-sm", prefix && "pl-12")}
-            {...props}
-          />
-        </div>
+        <Input
+          id={id}
+          value={contact[id]}
+          onChange={update(id)}
+          onBlur={touch(id)}
+          aria-invalid={!!err}
+          aria-describedby={err ? `${id}-error` : undefined}
+          className="h-11 text-base md:text-sm"
+          {...props}
+        />
+        {err && (
+          <p id={`${id}-error`} className="text-destructive text-xs">
+            {err}
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  const phoneField = (id: PhoneKey, label: string, opts: { required?: boolean; placeholder: string; autoComplete?: string }) => {
+    const err = errorFor(id);
+    return (
+      <div className="grid gap-1.5">
+        <Label htmlFor={id}>
+          {label}
+          {opts.required && <span className="text-destructive">*</span>}
+        </Label>
+        <PhoneField
+          id={id}
+          value={contact[id]}
+          onChange={(v) => setContact((c) => ({ ...c, [id]: v }))}
+          onBlur={touch(id)}
+          invalid={!!err}
+          describedBy={err ? `${id}-error` : undefined}
+          placeholder={opts.placeholder}
+          autoComplete={opts.autoComplete}
+        />
         {err && (
           <p id={`${id}-error`} className="text-destructive text-xs">
             {err}
@@ -294,14 +290,7 @@ export function ContactQrGenerator() {
               {field("firstName", "First name", { required: true, autoComplete: "given-name", placeholder: "John" })}
               {field("lastName", "Last name", { autoComplete: "family-name", placeholder: "Doe" })}
             </div>
-            {field("phone", "Mobile number", {
-              required: true,
-              type: "tel",
-              inputMode: "tel",
-              autoComplete: "tel-national",
-              prefix: COUNTRY_CODE,
-              placeholder: "123456789",
-            })}
+            {phoneField("phone", "Mobile number", { required: true, autoComplete: "tel", placeholder: "012-345 6789" })}
 
             {field("position", "Position", { placeholder: "Senior Engineer" })}
             <div className="grid gap-4 sm:grid-cols-2">
@@ -309,8 +298,7 @@ export function ContactQrGenerator() {
               {field("department", "Department", { placeholder: "IT Department" })}
             </div>
             <p className="text-muted-foreground -mt-1 text-xs">
-              Position, unit and department are shown under the QR code only. They aren&apos;t saved to the
-              scanner&apos;s contacts.
+              Position, unit and department are saved together as the contact&apos;s job title.
             </p>
 
             <button
@@ -333,14 +321,8 @@ export function ContactQrGenerator() {
                     autoComplete: "email",
                     placeholder: "johndoe@example.com",
                   })}
-                  {field("workPhone", "Work phone", {
-                    type: "tel",
-                    inputMode: "tel",
-                    prefix: COUNTRY_CODE,
-                    placeholder: "312345678",
-                  })}
+                  {phoneField("workPhone", "Work phone", { placeholder: "03-1234 5678" })}
                   {field("organization", "Company", { autoComplete: "organization", placeholder: "Acme Inc." })}
-                  {field("title", "Job title", { autoComplete: "organization-title", placeholder: "Product Manager" })}
                 </div>
                 {field("website", "Website", { type: "url", inputMode: "url", placeholder: "johndoe.com" })}
                 {field("street", "Street address", { autoComplete: "street-address", placeholder: "123 Main Street" })}
@@ -493,18 +475,10 @@ export function ContactQrGenerator() {
                   <PrinterIcon />
                   Print
                 </Button>
-                <div className={cn("grid gap-2", canShare && "grid-cols-2")}>
-                  <Button variant="outline" size="lg" className="h-11" onClick={handleDownload} disabled={!isValid}>
-                    <DownloadIcon />
-                    Download PNG
-                  </Button>
-                  {canShare && (
-                    <Button variant="outline" size="lg" className="h-11" onClick={handleShare} disabled={!isValid}>
-                      <Share2Icon />
-                      Share
-                    </Button>
-                  )}
-                </div>
+                <Button variant="outline" size="lg" className="h-11" onClick={handleDownload} disabled={!isValid}>
+                  <DownloadIcon />
+                  Download PNG
+                </Button>
               </div>
             </CardContent>
           </Card>
@@ -525,7 +499,7 @@ export function ContactQrGenerator() {
         </div>
       )}
 
-      {/* High-resolution canvas used for PNG download / share */}
+      {/* High-resolution canvas used for the PNG download */}
       {isValid && (
         <div className="hidden" aria-hidden>
           <QRCodeCanvas ref={canvasRef} value={vcard} level="M" size={1024} marginSize={2} />
