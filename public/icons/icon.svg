@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#111827"/>
+  <g transform="translate(0 0) scale(1)">
+    
+  <rect x="76" y="76" width="140" height="140" rx="28" fill="#fff"/>
+  <rect x="98" y="98" width="96" height="96" rx="14" fill="#111827"/>
+  <rect x="120" y="120" width="52" height="52" rx="10" fill="#fff"/>
+    
+  <rect x="296" y="76" width="140" height="140" rx="28" fill="#fff"/>
+  <rect x="318" y="98" width="96" height="96" rx="14" fill="#111827"/>
+  <rect x="340" y="120" width="52" height="52" rx="10" fill="#fff"/>
+    
+  <rect x="76" y="296" width="140" height="140" rx="28" fill="#fff"/>
+  <rect x="98" y="318" width="96" height="96" rx="14" fill="#111827"/>
+  <rect x="120" y="340" width="52" height="52" rx="10" fill="#fff"/>
+    <!-- contact badge in the fourth corner -->
+    <circle cx="366" cy="366" r="80" fill="#22c55e"/>
+    <circle cx="366" cy="340" r="24" fill="#fff"/>
+    <path d="M322 412c4-28 22-42 44-42s40 14 44 42z" fill="#fff"/>
+  </g>
+</svg>
